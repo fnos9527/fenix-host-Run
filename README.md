@@ -1,1 +1,11 @@
 # fenix-host-Run
+
+`VLESS_LINK`
+
+`FENIX_EMAIL`
+
+`FENIX_PASSWORD`
+
+`TG_BOT_TOKEN`
+
+`TG_CHAT_ID`
