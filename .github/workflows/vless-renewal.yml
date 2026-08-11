@@ -11,23 +11,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: 安装依赖
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: 安装系统依赖
         run: |
-          apt-get update
-          apt-get install -y xvfb libxss1 libappindicator1
-          npm install -g puppeteer-real-browser
+          sudo apt-get update
+          sudo apt-get install -y xvfb libxss1 libappindicator1 wget unzip
+          
+      - name: 创建工作目录
+        run: |
+          mkdir -p ~/.config/Xray
+          cd ~/.config/Xray
           
       - name: 下载 Xray v25.9.11
         run: |
+          cd ~/.config/Xray
           wget https://github.com/XTLS/Xray-core/releases/download/v25.9.11/Xray-linux-64.zip
-          unzip Xray-linux-64.zip
+          unzip -o Xray-linux-64.zip
           chmod +x xray
+          rm -f Xray-linux-64.zip
+          
+      - name: 安装 Node 依赖
+        run: |
+          npm install puppeteer-real-browser
           
       - name: 运行续期脚本
         env:
           VLESS_LINK: ${{ secrets.VLESS_LINK }}
-          EMAIL: ${{ secrets.FENIX_EMAIL }}
-          PASSWORD: ${{ secrets.FENIX_PASSWORD }}
+          FENIX_EMAIL: ${{ secrets.FENIX_EMAIL }}
+          FENIX_PASSWORD: ${{ secrets.FENIX_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: node renewal.js
+          XRAY_PATH: ~/.config/Xray/xray
+        run: |
+          export DISPLAY=:99
+          sudo Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          sleep 2
+          node renewal.js
