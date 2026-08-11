@@ -181,27 +181,28 @@ class VLESSRenewal {
     };
   }
 
-  // 启动 Xray 代理
-  async startXrayProxy(vlConfig) {
-    const configPath = '/tmp/xray-config.json';
-    const config = this.generateXrayConfig(vlConfig);
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  // 修改 startXrayProxy 方法中的路径
+async startXrayProxy(vlConfig) {
+  const configPath = '/tmp/xray-config.json';
+  const config = this.generateXrayConfig(vlConfig);
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-    try {
-      await execAsync(`pkill -f './xray'`).catch(() => {});
-      await sleep(1000);
-    } catch (e) {
-      // ignore
-    }
-
-    const { spawn } = require('child_process');
-    this.xrayProcess = spawn('./xray', ['run', '-c', configPath], {
-      cwd: process.cwd(),
-      stdio: 'pipe',
-    });
-
-    await sleep(2000);
+  try {
+    await execAsync(`pkill -f xray`).catch(() => {});
+    await sleep(1000);
+  } catch (e) {
+    // ignore
   }
+
+  const xrayBin = process.env.XRAY_PATH || './xray';
+  const { spawn } = require('child_process');
+  this.xrayProcess = spawn(xrayBin, ['run', '-c', configPath], {
+    stdio: 'pipe',
+    detached: true,
+  });
+
+  await sleep(2000);
+}
 
   // Puppeteer 登录
   async login(browser, page) {
