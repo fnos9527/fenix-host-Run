@@ -1,0 +1,33 @@
+name: VLESS 续期脚本
+
+on:
+  schedule:
+    - cron: '0 0 */5 * *'  # 每5天运行一次
+  workflow_dispatch:
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 安装依赖
+        run: |
+          apt-get update
+          apt-get install -y xvfb libxss1 libappindicator1
+          npm install -g puppeteer-real-browser
+          
+      - name: 下载 Xray v25.9.11
+        run: |
+          wget https://github.com/XTLS/Xray-core/releases/download/v25.9.11/Xray-linux-64.zip
+          unzip Xray-linux-64.zip
+          chmod +x xray
+          
+      - name: 运行续期脚本
+        env:
+          VLESS_LINK: ${{ secrets.VLESS_LINK }}
+          EMAIL: ${{ secrets.FENIX_EMAIL }}
+          PASSWORD: ${{ secrets.FENIX_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: node renewal.js
