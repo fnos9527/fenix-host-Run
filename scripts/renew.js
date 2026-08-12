@@ -30,7 +30,7 @@ const EMAIL = process.env.FENIX_EMAIL;
 const PASSWORD = process.env.FENIX_PASSWORD;
 const TG_TOKEN = process.env.TG_BOT_TOKEN;
 const TG_CHAT_ID = process.env.TG_CHAT_ID;
-const SOCKS5_PROXY = process.env.SOCKS5_PROXY || 'socks5://127.0.0.1:1080';
+const SOCKS5_PROXY = process.env.DISABLE_PROXY === 'true' ? null : (process.env.SOCKS5_PROXY || 'socks5://127.0.0.1:1080');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'last-renew.json');
 const MIN_INTERVAL_DAYS = parseFloat(process.env.MIN_INTERVAL_DAYS || '5');
@@ -102,23 +102,25 @@ async function clickByText(page, text) {
 
 // 尝试处理 Cloudflare Turnstile：puppeteer-real-browser 的 turnstile:true
 // 会自动处理大多数情况，这里再做一次兜底点击。
-async function tryPassTurnstile(page) {
-  const deadline = Date.now() + 20000;
-  while (Date.now() < deadline) {
-    const frame = page.frames().find((f) => f.url().includes('challenges.cloudflare.com'));
-    if (frame) {
-      try {
-        await frame.click('input[type="checkbox"]');
-      } catch (e) {
-        // iframe 结构可能不含标准 checkbox，或已经通过，忽略
-      }
-    }
-    const stillThere = await page
-      .evaluate(() => !!document.querySelector('input[type="checkbox"]'))
-      .catch(() => false);
-    if (!stillThere) break;
+// 等待 Cloudflare Turnstile 验证通过。
+// 不做任何手动点击——puppeteer-real-browser 的 turnstile:true 已经会用
+// 拟人化的鼠标行为去处理它；我们只需要轮询 Turnstile 生成的隐藏 token
+// (input[name="cf-turnstile-response"]) 是否已经有值来判断是否验证成功。
+// 之前版本会在 iframe 内部强制点击一个 checkbox，这很可能是导致 Cloudflare
+// 反复 reset() 验证、一直卡在 "Verifying..." 的原因，现已移除。
+async function waitForTurnstile(page, timeoutMs = 90000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const token = await page
+      .evaluate(() => {
+        const el = document.querySelector('input[name="cf-turnstile-response"]');
+        return el ? el.value : null;
+      })
+      .catch(() => null);
+    if (token) return true;
     await new Promise((r) => setTimeout(r, 1000));
   }
+  return false;
 }
 
 async function main() {
@@ -140,7 +142,7 @@ async function main() {
   const { browser, page } = await connect({
     headless: false,
     turnstile: true,
-    args: [`--proxy-server=${SOCKS5_PROXY}`],
+    args: SOCKS5_PROXY ? [`--proxy-server=${SOCKS5_PROXY}`] : [],
     customConfig: {},
     connectOption: { defaultViewport: { width: 1366, height: 900 } },
     disableXvfb: false
@@ -160,11 +162,22 @@ async function main() {
     await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 30 });
     await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 30 });
 
-    await tryPassTurnstile(page);
-    await new Promise((r) => setTimeout(r, 1500));
+    const turnstilePassed = await waitForTurnstile(page, 90000);
+    if (!turnstilePassed) {
+      throw new Error(
+        'Cloudflare Turnstile 验证一直卡在 Verifying 状态、90 秒内未通过。' +
+          '大概率是当前 VLESS 节点的出口 IP 被 Cloudflare 判定为高风险(数据中心/已知代理段)，' +
+          '建议换一个住宅/家宽属性更好的节点再试，或临时不走代理测试对比。'
+      );
+    }
 
     await clickByText(page, 'Sign in');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+
+    // 登录后如果仍停留在 /login，说明账号密码或验证没有真正通过
+    if (/\/login/i.test(page.url())) {
+      throw new Error('提交登录后仍停留在登录页，账号密码或验证码校验可能未通过');
+    }
 
     await page.goto(SERVICE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
