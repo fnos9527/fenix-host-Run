@@ -19,7 +19,7 @@ jobs:
       - name: 安装系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libxss1 libappindicator1 wget unzip
+          sudo apt-get install -y xvfb libxss1 wget unzip
           
       - name: 创建工作目录
         run: |
