@@ -185,6 +185,17 @@ async function main() {
     success = afterSeconds > beforeSeconds;
   } catch (e) {
     errorMsg = e.message;
+    console.error('[renew] 出错:', e.stack || e.message);
+    // 失败时保存截图 + 当前页面 HTML，方便排查具体卡在哪一步
+    try {
+      const curUrl = page.url();
+      console.error('[renew] 出错时页面 URL:', curUrl);
+      await page.screenshot({ path: path.join(__dirname, '..', 'debug-failure.png'), fullPage: true });
+      fs.writeFileSync(path.join(__dirname, '..', 'debug-failure.html'), await page.content());
+      console.error('[renew] 已保存 debug-failure.png / debug-failure.html');
+    } catch (e2) {
+      console.error('[renew] 保存调试信息也失败了:', e2.message);
+    }
   } finally {
     await browser.close().catch(() => {});
   }
