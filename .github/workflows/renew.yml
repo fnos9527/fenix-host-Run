@@ -1,0 +1,76 @@
+name: FenixHost Auto Renew
+
+on:
+  schedule:
+    # GitHub Actions 的 schedule 不能精确保证"每 5 天"（存在延迟、且 cron 本身按日历字段计算，
+    # 跨月边界会不均匀）。因此这里改为"每天检查一次"，真正的 5 天间隔由
+    # scripts/renew.js 通过 data/last-renew.json 中记录的上次成功续期时间来判断，
+    # 未到 5 天会自动跳过，不会真的去点击续期。
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '忽略 5 天间隔限制，强制立即续期'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install system dependencies (Xvfb + Chromium 运行库)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 \
+            libgbm1 libasound2t64 libxss1 libxcomposite1 libxrandr2 \
+            libxdamage1 libxfixes3 libxkbcommon0 unzip curl
+
+      - name: Install npm dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: 生成 Xray 配置并启动本地 Socks5 代理 (v25.9.11)
+        env:
+          VLESS_LINK: ${{ secrets.VLESS_LINK }}
+        run: |
+          set -e
+          node scripts/parse-vless.js "$VLESS_LINK" > xray-config.json
+          curl -fL -o xray.zip \
+            https://github.com/XTLS/Xray-core/releases/download/v25.9.11/Xray-linux-64.zip
+          unzip -o xray.zip -d xray-bin
+          chmod +x xray-bin/xray
+          nohup ./xray-bin/xray run -c xray-config.json > xray.log 2>&1 &
+          sleep 3
+          echo "---- xray.log ----"
+          cat xray.log || true
+
+      - name: 执行续期脚本
+        env:
+          FENIX_EMAIL: ${{ secrets.FENIX_EMAIL }}
+          FENIX_PASSWORD: ${{ secrets.FENIX_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          SERVICE_URL: https://fenixhost.net/services/535
+          SOCKS5_PROXY: socks5://127.0.0.1:1080
+          MIN_INTERVAL_DAYS: '5'
+          FORCE_RUN: ${{ github.event.inputs.force }}
+        run: node scripts/renew.js
+
+      - name: 提交更新后的续期状态文件
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/last-renew.json
+          git diff --cached --quiet || git commit -m "chore: update renew state [skip ci]"
+          git push
