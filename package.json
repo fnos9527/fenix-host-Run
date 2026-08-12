@@ -1,0 +1,17 @@
+{
+  "name": "fenixhost-auto-renew",
+  "version": "1.0.0",
+  "private": true,
+  "description": "通过 VLESS 节点转发流量，自动登录 FenixHost 并续期服务，结果通过 Telegram 通知",
+  "main": "scripts/renew.js",
+  "scripts": {
+    "renew": "node scripts/renew.js",
+    "parse-vless": "node scripts/parse-vless.js"
+  },
+  "dependencies": {
+    "puppeteer-real-browser": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
