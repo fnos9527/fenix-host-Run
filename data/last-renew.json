@@ -1,4 +1,14 @@
 {
-  "lastRenewAt": null,
-  "history": []
+  "lastRenewAt": "2026-08-12T04:59:29.851Z",
+  "history": [
+    {
+      "time": "2026-08-12T04:59:29.851Z",
+      "beforeSeconds": 1152506,
+      "afterSeconds": 1209596,
+      "beforeRaw": "13d 8h 8m 26s",
+      "afterRaw": "13d 23h 59m 56s",
+      "success": true,
+      "error": null
+    }
+  ]
 }
