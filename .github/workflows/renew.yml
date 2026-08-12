@@ -67,6 +67,18 @@ jobs:
           FORCE_RUN: ${{ github.event.inputs.force }}
         run: node scripts/renew.js
 
+      - name: 失败时上传调试截图/HTML
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-failure
+          path: |
+            debug-failure.png
+            debug-failure.html
+            xray.log
+          if-no-files-found: ignore
+          retention-days: 5
+
       - name: 提交更新后的续期状态文件
         run: |
           git config user.name "github-actions[bot]"
