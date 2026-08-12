@@ -100,9 +100,7 @@ async function clickByText(page, text) {
   return true;
 }
 
-// 尝试处理 Cloudflare Turnstile：puppeteer-real-browser 的 turnstile:true
-// 会自动处理大多数情况，这里再做一次兜底点击。
-// 等待 Cloudflare Turnstile 验证通过。
+// 尝试处理 Cloudflare Turnstile：等待 Turnstile 验证通过。
 // 不做任何手动点击——puppeteer-real-browser 的 turnstile:true 已经会用
 // 拟人化的鼠标行为去处理它；我们只需要轮询 Turnstile 生成的隐藏 token
 // (input[name="cf-turnstile-response"]) 是否已经有值来判断是否验证成功。
@@ -119,6 +117,42 @@ async function waitForTurnstile(page, timeoutMs = 90000) {
       .catch(() => null);
     if (token) return true;
     await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
+// 稳健输入：逐字符模拟输入完成后立即校验实际值是否等于预期；
+// 如果中途被页面重渲染（比如 Turnstile/Livewire 触发的 DOM morph）打断导致内容缺失，
+// 会清空重试，最后一次兜底直接用原生 setter 强制赋值并派发 input/change 事件
+// （这样 Livewire 的 wire:model 也能收到变更通知），避免逐字符输入被打断的问题。
+async function safeType(page, selector, text, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await page.click(selector, { clickCount: 3 }).catch(() => {});
+    await page.keyboard.press('Backspace').catch(() => {});
+
+    if (attempt < maxAttempts) {
+      await page.type(selector, text, { delay: 20 });
+    } else {
+      // 最后一次尝试：直接用原生 value setter 强制赋值，绕开逐字符输入被打断的问题
+      await page.evaluate(
+        (sel, val) => {
+          const el = document.querySelector(sel);
+          if (!el) return;
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(el, val);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        selector,
+        text
+      );
+    }
+
+    const actual = await page.$eval(selector, (el) => el.value).catch(() => '');
+    if (actual === text) return true;
+    console.warn(
+      `[renew] ${selector} 第 ${attempt} 次输入后校验不一致（期望长度 ${text.length}，实际长度 ${actual.length}），重试...`
+    );
   }
   return false;
 }
@@ -159,8 +193,12 @@ async function main() {
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
     await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 30000 });
-    await page.type('input[type="email"], input[name="email"]', EMAIL, { delay: 30 });
-    await page.type('input[type="password"], input[name="password"]', PASSWORD, { delay: 30 });
+
+    const emailOk = await safeType(page, 'input[type="email"], input[name="email"]', EMAIL);
+    if (!emailOk) throw new Error('邮箱输入框多次重试后内容仍与预期不一致，可能页面持续被重渲染打断');
+
+    const pwdOk = await safeType(page, 'input[type="password"], input[name="password"]', PASSWORD);
+    if (!pwdOk) throw new Error('密码输入框多次重试后内容仍与预期不一致，可能页面持续被重渲染打断');
 
     const turnstilePassed = await waitForTurnstile(page, 90000);
     if (!turnstilePassed) {
@@ -169,6 +207,21 @@ async function main() {
           '大概率是当前 VLESS 节点的出口 IP 被 Cloudflare 判定为高风险(数据中心/已知代理段)，' +
           '建议换一个住宅/家宽属性更好的节点再试，或临时不走代理测试对比。'
       );
+    }
+
+    // Turnstile 通过前后页面可能又发生一次 DOM 重渲染，点击登录前再校验一次两个输入框，
+    // 不一致就重打一次，避免像上次一样邮箱被截断成 "afnos" 这种情况。
+    const emailNow = await page.$eval('input[type="email"], input[name="email"]', (el) => el.value).catch(() => '');
+    if (emailNow !== EMAIL) {
+      console.warn('[renew] 登录前复查发现邮箱内容不一致，重新输入一次');
+      const ok = await safeType(page, 'input[type="email"], input[name="email"]', EMAIL);
+      if (!ok) throw new Error('登录前复查邮箱输入仍不一致，多次重试失败');
+    }
+    const pwdNow = await page.$eval('input[type="password"], input[name="password"]', (el) => el.value).catch(() => '');
+    if (pwdNow !== PASSWORD) {
+      console.warn('[renew] 登录前复查发现密码内容不一致，重新输入一次');
+      const ok = await safeType(page, 'input[type="password"], input[name="password"]', PASSWORD);
+      if (!ok) throw new Error('登录前复查密码输入仍不一致，多次重试失败');
     }
 
     await clickByText(page, 'Sign in');
