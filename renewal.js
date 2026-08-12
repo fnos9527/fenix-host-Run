@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer-real-browser');
 const { exec } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
@@ -16,6 +17,16 @@ class VLESSRenewal {
     this.browser = null;
     this.timeBeforeRenewal = null;
     this.timeAfterRenewal = null;
+  }
+
+  // 展开路径中的 ~，Node 的 spawn 不会像 shell 那样自动处理
+  resolveHomePath(p) {
+    if (!p) return p;
+    if (p === '~') return os.homedir();
+    if (p.startsWith('~/') || p.startsWith('~\\')) {
+      return path.join(os.homedir(), p.slice(2));
+    }
+    return p;
   }
 
   // 解析 VLESS 链接
@@ -181,28 +192,41 @@ class VLESSRenewal {
     };
   }
 
-  // 修改 startXrayProxy 方法中的路径
-async startXrayProxy(vlConfig) {
-  const configPath = '/tmp/xray-config.json';
-  const config = this.generateXrayConfig(vlConfig);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  // 启动 Xray 代理
+  async startXrayProxy(vlConfig) {
+    const configPath = '/tmp/xray-config.json';
+    const config = this.generateXrayConfig(vlConfig);
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-  try {
-    await execAsync(`pkill -f xray`).catch(() => {});
-    await sleep(1000);
-  } catch (e) {
-    // ignore
+    try {
+      await execAsync(`pkill -f xray`).catch(() => {});
+      await sleep(1000);
+    } catch (e) {
+      // ignore
+    }
+
+    // 展开 ~ 路径，避免 spawn ENOENT（spawn 不做 shell 展开）
+    let xrayBin = this.resolveHomePath(process.env.XRAY_PATH) || './xray';
+    xrayBin = path.resolve(xrayBin);
+
+    if (!fs.existsSync(xrayBin)) {
+      throw new Error(`未找到 xray 可执行文件: ${xrayBin}`);
+    }
+
+    const { spawn } = require('child_process');
+    this.xrayProcess = spawn(xrayBin, ['run', '-c', configPath], {
+      stdio: 'pipe',
+      detached: true,
+    });
+
+    this.xrayProcess.stdout.on('data', (d) => console.log(`[xray] ${d.toString().trim()}`));
+    this.xrayProcess.stderr.on('data', (d) => console.warn(`[xray] ${d.toString().trim()}`));
+    this.xrayProcess.on('error', (err) => {
+      console.error('Xray 进程启动失败:', err.message);
+    });
+
+    await sleep(2000);
   }
-
-  const xrayBin = process.env.XRAY_PATH || './xray';
-  const { spawn } = require('child_process');
-  this.xrayProcess = spawn(xrayBin, ['run', '-c', configPath], {
-    stdio: 'pipe',
-    detached: true,
-  });
-
-  await sleep(2000);
-}
 
   // Puppeteer 登录
   async login(browser, page) {
