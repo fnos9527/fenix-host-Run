@@ -13,6 +13,10 @@ on:
         description: '忽略 5 天间隔限制，强制立即续期'
         type: boolean
         default: false
+      disable_proxy:
+        description: '临时不走 VLESS 代理（用 GitHub 出口 IP 测试，排查是否代理IP被CF标记）'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -63,6 +67,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           SERVICE_URL: https://fenixhost.net/services/535
           SOCKS5_PROXY: socks5://127.0.0.1:1080
+          DISABLE_PROXY: ${{ github.event.inputs.disable_proxy }}
           MIN_INTERVAL_DAYS: '5'
           FORCE_RUN: ${{ github.event.inputs.force }}
         run: node scripts/renew.js
